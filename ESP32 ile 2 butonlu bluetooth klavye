@@ -1,0 +1,162 @@
+#include <Adafruit_GFX.h> 
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEHIDDevice.h>
+#include <HIDKeyboardTypes.h>
+
+
+// TFT pinleri
+#define TFT_CS   5
+#define TFT_DC   2
+#define TFT_RST  4
+
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+
+// Butonlar
+#define BTN_NEXT    12
+#define BTN_SELECT  22
+
+// BLE HID
+BLEHIDDevice* hid;
+BLECharacteristic* inputKeyboard;
+BLEServer* pServer;
+
+// İstediğin harfler + SPACE + ENTER
+const char* labels[] = {
+  "A","B","C","D","E","F","G","H","I","J",
+  "K","L","M","N","O","P","R","S","T","U",
+  "V","Y","Z","BOS","OK"
+};
+int keyCount = sizeof(labels)/sizeof(labels[0]);
+
+struct KeyItem {
+  const char* label;
+  int16_t x, y;
+  uint16_t w, h;
+};
+KeyItem keys[30];
+int currentIndex = 0;
+
+// -------------------------------------------------
+
+void setup() {
+  pinMode(BTN_NEXT, INPUT_PULLUP);
+  pinMode(BTN_SELECT, INPUT_PULLUP);
+
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(1);
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextWrap(false);
+
+  initBLE();
+  layoutKeys();
+  drawFrame();
+}
+
+void loop() {
+  if (digitalRead(BTN_NEXT) == LOW) {
+    highlightKey(currentIndex, ST77XX_BLACK);
+    currentIndex = (currentIndex + 1) % keyCount;
+    highlightKey(currentIndex, ST77XX_MAGENTA);
+    delay(180);
+  }
+
+  if (digitalRead(BTN_SELECT) == LOW) {
+    sendKeyLabel(labels[currentIndex]);
+    delay(180);
+  }
+}
+
+// -------------------------------------------------
+// BLE HID kurulumu
+void initBLE() {
+  BLEDevice::init("dark web kıller");
+  pServer = BLEDevice::createServer();
+  hid = new BLEHIDDevice(pServer);
+  inputKeyboard = hid->inputReport(1);
+  hid->manufacturer()->setValue("Halim");
+  hid->pnp(0x02, 0xe502, 0xa111, 0x0210);
+  hid->hidInfo(0x00,0x01);
+
+  const uint8_t reportMap[] = {
+    0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01,
+    0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00,
+    0x25, 0x01, 0x75, 0x01, 0x95, 0x08, 0x81, 0x02,
+    0x95, 0x01, 0x75, 0x08, 0x81, 0x01, 0x95, 0x06,
+    0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07,
+    0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xC0
+  };
+  hid->reportMap((uint8_t*)reportMap, sizeof(reportMap));
+  hid->startServices();
+  pServer->getAdvertising()->start();
+}
+
+// -------------------------------------------------
+// Ekran çizimi
+void drawFrame() {
+  tft.fillRect(0, 0, 128, 160, ST77XX_BLACK);
+  drawKeys();
+  highlightKey(currentIndex, ST77XX_MAGENTA);
+}
+
+void layoutKeys() {
+  tft.setTextSize(1);
+  int idx = 0;
+  int y = 10;
+  for (int row = 0; row < 3; row++) {
+    int x = 6;
+    for (int col = 0; col < 8 && idx < 23; col++, idx++) {
+      keys[idx].label = labels[idx];
+      int16_t bx, by; uint16_t bw, bh;
+      tft.getTextBounds(keys[idx].label, 0, 0, &bx, &by, &bw, &bh);
+      keys[idx].x = x; keys[idx].y = y; keys[idx].w = bw; keys[idx].h = bh;
+      x += 14;
+    }
+    y += 20;
+  }
+  // Space ve Enter
+  keys[23].label = "BOS"; keys[23].x = 10; keys[23].y = 80; keys[23].w = 30; keys[23].h = 10;
+  keys[24].label = "OK"; keys[24].x = 70; keys[24].y = 80; keys[24].w = 30; keys[24].h = 10;
+}
+
+void drawKeys() {
+  tft.setTextSize(1);
+  tft.setTextColor(ST77XX_WHITE);
+  for (int i = 0; i < keyCount; i++) {
+    tft.setCursor(keys[i].x, keys[i].y);
+    tft.print(keys[i].label);
+  }
+}
+
+void highlightKey(int index, uint16_t color) {
+  KeyItem &k = keys[index];
+  tft.drawRect(k.x-2, k.y-2, k.w+6, k.h+6, color);
+}
+
+// -------------------------------------------------
+// HID gönderim
+void sendKeyLabel(const char* label) {
+  uint8_t report[8] = {0};
+  auto pressRelease = [&](uint8_t mod, uint8_t code) {
+    report[0] = mod; report[2] = code;
+    inputKeyboard->setValue(report, sizeof(report));
+    inputKeyboard->notify();
+    delay(40);
+    memset(report, 0, sizeof(report));
+    inputKeyboard->setValue(report, sizeof(report));
+    inputKeyboard->notify();
+  };
+
+  if (strcmp(label, "BOS") == 0) { pressRelease(0x00, 0x2C); return; }
+  if (strcmp(label, "OK") == 0) { pressRelease(0x00, 0x28); return; }
+
+  if (strlen(label) == 1) {
+    char c = label[0];
+    if (c >= 'A' && c <= 'Z') {
+      uint8_t code = (c - 'A') + 0x04;
+      pressRelease(0x02, code); // Shift ile büyük harf
+    }
+  }
+}
