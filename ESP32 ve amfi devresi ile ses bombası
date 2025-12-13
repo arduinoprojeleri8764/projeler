@@ -1,0 +1,41 @@
+#define WTV_PLAY   26  // P07 → PLAY
+#define WTV_RESET  27  // RESET
+#define WTV_NEXT   33  // P02 → NEXT
+#define WTV_PREV   25  // P06 → PREV
+#define WTV_VOLUP  32  // P04 → VOL+
+
+void pulse(int pin) {
+  digitalWrite(pin, LOW);   // butona bas
+  delay(200);               // 200 ms basılı tut
+  digitalWrite(pin, HIGH);  // bırak
+}
+
+void setup() {
+  pinMode(WTV_PLAY, OUTPUT);
+  pinMode(WTV_RESET, OUTPUT);
+  pinMode(WTV_NEXT, OUTPUT);
+  pinMode(WTV_PREV, OUTPUT);
+  pinMode(WTV_VOLUP, OUTPUT);
+
+  // Başlangıçta HIGH (buton serbest)
+  digitalWrite(WTV_PLAY, HIGH);
+  digitalWrite(WTV_RESET, HIGH);
+  digitalWrite(WTV_NEXT, HIGH);
+  digitalWrite(WTV_PREV, HIGH);
+  digitalWrite(WTV_VOLUP, HIGH);
+
+  // Modülü resetle
+  pulse(WTV_RESET);
+  delay(500);
+
+  // Şarkıyı başlat
+  pulse(WTV_PLAY);
+}
+
+void loop() {
+  // Şarkı süresi kadar bekle (örneğin 30 saniye)
+  delay(30000);
+
+  // Şarkıyı tekrar başlat (sonsuz döngü)
+  pulse(WTV_PLAY);
+}
