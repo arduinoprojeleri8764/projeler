@@ -1,0 +1,37 @@
+// Motor sürücü pin tanımları
+int ENA = 11;  // Motor A PWM pini
+int ENB = 3;   // Motor B PWM pini
+int IN1 = 6;   // Motor A yön pini (HIGH/LOW ile kontrol)
+int IN2 = 7;   // Motor A yön pini (sabit LOW)
+int IN3 = 4;   // Motor B yön pini (HIGH/LOW ile kontrol)
+int IN4 = 5;   // Motor B yön pini (sabit LOW)
+
+void setup() {
+  // Pinleri çıkış olarak ayarla
+  pinMode(ENA, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+
+  // Motor hızlarını sabit ayarla
+  analogWrite(ENA, 130); // Motor A hız
+  analogWrite(ENB, 110); // Motor B hız
+
+  // Sabit yön pinleri
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+void loop() {
+  // Motorları aynı anda çalıştır
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN3, HIGH);
+  delay(500); // 1 saniye çalış
+
+  // Motorları aynı anda durdur
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN3, LOW);
+  delay(1000); // 1 saniye bekle (dur)
+}
