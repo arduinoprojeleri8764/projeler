@@ -1,0 +1,105 @@
+#include <Adafruit_NeoPixel.h>
+
+#define LED_PIN     6
+#define LED_COUNT   10
+#define POT_PIN     A0   // 10k potansiyometre bağlı analog pin
+
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+void setup() {
+  strip.begin();
+  strip.show();
+}
+
+void loop() {
+  int potValue = analogRead(POT_PIN);          // 0-1023 arası değer
+  int range = map(potValue, 0, 1023, 0, 1023); // 0-1023 arası ölçekledik
+
+  if(range >= 0 && range <= 200) {
+    // 0-200: Beyaz sabit
+    setAll(strip.Color(255,255,255));
+  }
+  else if(range >= 201 && range <= 400) {
+    // 201-400: Yumuşak renk geçişleri
+    rainbowFade();
+  }
+  else if(range >= 401 && range <= 600) {
+    // 401-600: 24 renk sıralı animasyon
+    colorSequence();
+  }
+  else if(range >= 601 && range <= 800) {
+    // 601-800: Theater chase
+    theaterChase(strip.Color(0,255,0), 100); // yeşil chase
+  }
+  else if(range >= 801 && range <= 1000) {
+    // 801-1000: Rainbow cycle
+    rainbowCycle(5);
+  }
+  else if(range >= 1001 && range <= 1023) {
+    // 1001-1023: LED'ler tamamen kapalı
+    setAll(strip.Color(0,0,0));
+  }
+}
+
+// ------------------ Yardımcı Fonksiyonlar ------------------
+
+void setAll(uint32_t color) {
+  for(int i=0; i<LED_COUNT; i++) {
+    strip.setPixelColor(i, color);
+  }
+  strip.show();
+}
+
+void rainbowFade() {
+  static uint16_t j=0;
+  for(int i=0; i<LED_COUNT; i++) {
+    strip.setPixelColor(i, strip.ColorHSV((i*65536/LED_COUNT)+j, 255, 255));
+  }
+  strip.show();
+  j+=256;
+  delay(20);
+}
+
+void colorSequence() {
+  uint32_t colors[24] = {
+    strip.Color(255,0,0), strip.Color(255,128,0), strip.Color(255,255,0),
+    strip.Color(128,255,0), strip.Color(0,255,0), strip.Color(0,255,128),
+    strip.Color(0,255,255), strip.Color(0,128,255), strip.Color(0,0,255),
+    strip.Color(128,0,255), strip.Color(255,0,255), strip.Color(255,0,128),
+    strip.Color(255,64,64), strip.Color(255,128,64), strip.Color(255,255,128),
+    strip.Color(128,255,128), strip.Color(128,255,255), strip.Color(128,128,255),
+    strip.Color(192,128,255), strip.Color(255,128,255), strip.Color(255,64,128),
+    strip.Color(255,192,0), strip.Color(192,255,0), strip.Color(64,255,192)
+  };
+
+  static int idx=0;
+  setAll(colors[idx]);
+  delay(1000);
+  setAll(strip.Color(0,0,0)); // sön
+  delay(200);
+  idx++;
+  if(idx>=24) idx=0;
+}
+
+void theaterChase(uint32_t c, int wait) {
+  for (int q=0; q < 3; q++) {
+    for (int i=0; i < LED_COUNT; i=i+3) {
+      strip.setPixelColor(i+q, c);
+    }
+    strip.show();
+    delay(wait);
+    for (int i=0; i < LED_COUNT; i=i+3) {
+      strip.setPixelColor(i+q, 0);
+    }
+  }
+}
+
+void rainbowCycle(int wait) {
+  static uint16_t j=0;
+  for(int i=0; i<LED_COUNT; i++) {
+    strip.setPixelColor(i, strip.ColorHSV(((i*65536/LED_COUNT)+j), 255, 255));
+  }
+  strip.show();
+  j+=256;
+  delay(wait);
+}
