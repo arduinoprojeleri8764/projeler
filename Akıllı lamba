@@ -15,9 +15,9 @@ void loop() {
     String cmd = SerialBT.readStringUntil('\n');  // Komutu satır sonuna kadar oku
     cmd.trim();                                   // Boşluk/CRLF temizle
 
-    if (cmd == "on") {
+    if (cmd == "off") {
       digitalWrite(relayPin, HIGH);               // ON -> GPIO26 HIGH
-    } else if (cmd == "off") {
+    } else if (cmd == "on") {
       digitalWrite(relayPin, LOW);                // OFF -> GPIO26 LOW
     }
   }
