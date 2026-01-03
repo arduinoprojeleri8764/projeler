@@ -1,0 +1,24 @@
+#include "BluetoothSerial.h"
+
+BluetoothSerial SerialBT;
+
+const int relayPin = 26;  // Röle IN -> GPIO26
+
+void setup() {
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, LOW);         // Başlangıçta kapalı
+  SerialBT.begin("ESP32_Lamba");       // Bluetooth cihaz adı
+}
+
+void loop() {
+  if (SerialBT.available()) {
+    String cmd = SerialBT.readStringUntil('\n');  // Komutu satır sonuna kadar oku
+    cmd.trim();                                   // Boşluk/CRLF temizle
+
+    if (cmd == "on") {
+      digitalWrite(relayPin, HIGH);               // ON -> GPIO26 HIGH
+    } else if (cmd == "off") {
+      digitalWrite(relayPin, LOW);                // OFF -> GPIO26 LOW
+    }
+  }
+}
