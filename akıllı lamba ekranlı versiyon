@@ -1,0 +1,200 @@
+#include <BluetoothSerial.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
+
+BluetoothSerial SerialBT;
+
+// Röle
+#define RELAY_PIN 26
+
+// TFT pinleri (senin ekran ayarların)
+#define TFT_CS   5
+#define TFT_DC   2
+#define TFT_RST  4
+
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+
+// Renkler (RGB565)
+#define COL_GREY      0x8410
+#define COL_DARKGREY  0x5AEB
+#define COL_BLUE      ST77XX_BLUE
+#define COL_BLACK     ST77XX_BLACK
+#define COL_WHITE     ST77XX_WHITE
+#define COL_GREEN     ST77XX_GREEN
+#define COL_RED       ST77XX_RED
+#define COL_CYAN      ST77XX_CYAN
+
+// UI boyutları
+const int W = 160;   // setRotation(1) ile genişlik
+const int H = 128;   // setRotation(1) ile yükseklik
+
+bool isOn = false;
+
+// ----------------- Yardımcı çizim fonksiyonları -----------------
+
+void drawGradient(bool state) {
+  // Koyu gri (kapalı) veya mavi (açık) arka plan için basit gradient
+  uint16_t top = state ? 0x1B3F /* koyu mavi */ : 0x4A69 /* koyu gri */;
+  uint16_t mid = state ? 0x2C9F /* orta mavi */ : 0x7392 /* orta gri */;
+  uint16_t bot = state ? 0x3DFF /* daha açık mavi */ : 0x8C72 /* açık gri */;
+
+  for (int y = 0; y < H; y++) {
+    float t = (float)y / (H - 1);
+    // iki aşamalı lerp: top->mid ve mid->bot
+    uint16_t c;
+    if (t < 0.5f) {
+      float k = t / 0.5f;
+      // RGB565 linear blend
+      uint8_t r = ((top >> 11) & 0x1F) * (1 - k) + ((mid >> 11) & 0x1F) * k;
+      uint8_t g = ((top >> 5) & 0x3F) * (1 - k) + ((mid >> 5) & 0x3F) * k;
+      uint8_t b = (top & 0x1F) * (1 - k) + (mid & 0x1F) * k;
+      c = (r << 11) | (g << 5) | (b);
+    } else {
+      float k = (t - 0.5f) / 0.5f;
+      uint8_t r = ((mid >> 11) & 0x1F) * (1 - k) + ((bot >> 11) & 0x1F) * k;
+      uint8_t g = ((mid >> 5) & 0x3F) * (1 - k) + ((bot >> 5) & 0x3F) * k;
+      uint8_t b = (mid & 0x1F) * (1 - k) + (bot & 0x1F) * k;
+      c = (r << 11) | (g << 5) | (b);
+    }
+    tft.drawFastHLine(0, y, W, c);
+  }
+}
+
+void drawHeader() {
+  tft.setTextWrap(false);
+  tft.setTextSize(2);
+  tft.setTextColor(COL_WHITE);
+  int16_t bx, by; uint16_t bw, bh;
+  tft.getTextBounds("Akilli Lamba", 0, 0, &bx, &by, &bw, &bh);
+  int x = (W - bw) / 2;
+  tft.setCursor(x, 6);
+  tft.println("Akilli Lamba");
+}
+
+void drawBulbIcon(bool state) {
+  // Merkez: üst tarafta büyük ikon
+  int cx = W / 2;
+  int cy = 44;
+  uint16_t glow = state ? COL_CYAN : COL_GREY;
+
+  // Glow halo
+  if (state) {
+    tft.drawCircle(cx, cy, 22, glow);
+    tft.drawCircle(cx, cy, 20, glow);
+  }
+
+  // Ampul üst gövde
+  tft.fillCircle(cx, cy, 18, state ? COL_CYAN : COL_DARKGREY);
+  tft.fillCircle(cx, cy, 16, state ? 0x5EFF /* açık cam mavi */ : COL_GREY);
+
+  // Ampul tabanı
+  tft.fillRoundRect(cx - 10, cy + 14, 20, 10, 3, COL_BLACK);
+  tft.drawFastHLine(cx - 10, cy + 14, 20, COL_WHITE);
+
+  // Filament - küçük beyaz yay
+  tft.drawCircle(cx, cy + 4, 6, COL_WHITE);
+  tft.drawCircle(cx, cy + 4, 5, COL_WHITE);
+}
+
+void drawStatusText(bool state) {
+  tft.setTextSize(2);
+  tft.setTextColor(state ? COL_GREEN : COL_RED);
+  const char* txt = state ? "Acik" : "Kapali";
+  int16_t bx, by; uint16_t bw, bh;
+  tft.getTextBounds(txt, 0, 0, &bx, &by, &bw, &bh);
+  int x = (W - bw) / 2;
+  tft.setCursor(x, 78);
+  tft.println(txt);
+}
+
+void drawToggleTrack() {
+  // Toggle arka plan: cam görünümlü beyaz
+  int x = 24, y = 96, w = 112, h = 26;
+  tft.fillRoundRect(x, y, w, h, 13, COL_WHITE);
+  // Üst highlight çizgisi
+  tft.drawFastHLine(x + 4, y + 5, w - 8, COL_GREY);
+}
+
+void drawToggleThumb(int x) {
+  // Cam görünümlü siyah-butonu
+  int y = 109;
+  tft.fillCircle(x, y, 11, COL_BLACK);
+  // Parlaklık highlight
+  tft.drawCircle(x, y, 11, COL_GREY);
+  tft.drawCircle(x - 3, y - 3, 4, COL_GREY);
+}
+
+void animateToggle(bool fromOn, bool toOn) {
+  int startX = fromOn ? 118 : 34;
+  int endX   = toOn   ? 118 : 34;
+
+  int steps = 18;
+  for (int i = 0; i <= steps; i++) {
+    // Easing (quadratic)
+    float k = (float)i / steps;
+    float e = k * k;
+    int x = startX + (int)((endX - startX) * e);
+
+    // Toggle track yeniden çiz
+    drawToggleTrack();
+    // Thumb
+    drawToggleThumb(x);
+    delay(18);
+  }
+}
+
+void drawUI(bool state, bool withAnim) {
+  // Arka plan ve üst öğeler
+  drawGradient(state);
+  drawHeader();
+  drawBulbIcon(state);
+  drawStatusText(state);
+
+  // Toggle ve animasyon
+  if (withAnim) {
+    animateToggle(!state, state);
+  } else {
+    drawToggleTrack();
+    drawToggleThumb(state ? 118 : 34);
+  }
+}
+
+// ----------------- Setup ve Loop -----------------
+
+void setup() {
+  // Röle
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH);  // Başlangıçta kapalı (ters mantık)
+
+  // Bluetooth
+  SerialBT.begin("ESP32_Lamba");
+
+  // TFT
+  tft.initR(INITR_BLACKTAB);   // Senin modül bu tab ile çalışıyor
+  tft.setRotation(1);          // 160x128 yönlendirme
+  drawUI(false, false);        // Başlangıç görünümü (kapalı)
+}
+
+void loop() {
+  if (SerialBT.available()) {
+    String cmd = SerialBT.readStringUntil('\n');
+    cmd.trim();
+
+    if (cmd.equalsIgnoreCase("on")) {
+      // Röle çek → lamba açık
+      digitalWrite(RELAY_PIN, LOW);
+      if (!isOn) {
+        drawUI(true, true);   // animasyonlu geçiş
+        isOn = true;
+      }
+    } else if (cmd.equalsIgnoreCase("off")) {
+      // Röle bırak → lamba kapalı
+      digitalWrite(RELAY_PIN, HIGH);
+      if (isOn) {
+        drawUI(false, true);  // animasyonlu geçiş
+        isOn = false;
+      }
+    }
+  }
+}
