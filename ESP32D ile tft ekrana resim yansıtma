@@ -1,0 +1,39 @@
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
+
+// TFT ekran pinleri (senin bağlantılarına göre)
+#define TFT_CS   5
+#define TFT_DC   2
+#define TFT_RST  4
+
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+
+// Örnek bitmap (sen burayı kendi görselinle değiştireceksin)
+const uint16_t myBitmap[] PROGMEM = {sizin bitmap değerleriniz buraya gelecek};
+
+// Bitmap boyutu (örnek: 4x2 piksel)
+const int bmpWidth = 160;
+const int bmpHeight = 128;
+
+void drawBitmap(int x, int y) {
+  for (int j = 0; j < bmpHeight; j++) {
+    for (int i = 0; i < bmpWidth; i++) {
+      uint16_t color = pgm_read_word(&myBitmap[j * bmpWidth + i]);
+      tft.drawPixel(x + i, y + j, color);
+    }
+  }
+}
+
+void setup() {
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(1);
+  tft.fillScreen(ST77XX_BLACK);
+
+  // Bitmap'i ekrana çiz
+  drawBitmap(20, 20);  // sol üst köşe (x=20, y=20)
+}
+
+void loop() {
+  // loop boş, sadece setup'ta çizim var
+}
