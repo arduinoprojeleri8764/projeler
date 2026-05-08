@@ -1,0 +1,80 @@
+#include "BluetoothSerial.h"
+
+// --- ARABANIN KİMLİK BİLGİLERİ ---
+uint8_t address[6]  = {0x00, 0x22, 0x04, 0x01, 0x27, 0x63}; // sizin hc-05 veya 06 bluetooth modülünüzün mac adresi yazılacak
+const char *pin = "1234"; 
+
+BluetoothSerial SerialBT;
+
+// --- Joystick Shield Pinleri ---
+#define JOY_X      34
+#define JOY_Y      35
+#define BTN_K      27  // geri isteğe bağlı başka işlev atanabilir
+#define BTN_E      25  // sola dön isteğe bağlı başka fonksiyon atanabilir
+#define BTN_B      14  // vites [1,5] arası 
+#define BTN_D      32  // korna
+#define BTN_SOL    33  // gereksiz boşta istediğiniz işlevi atayabilirsiniz
+
+int vites = 1;
+bool vitesArtisYon = true; 
+bool son_E_durum = HIGH;
+unsigned long sonGonderimZamani = 0;
+
+void setup() {
+  Serial.begin(115200);
+  SerialBT.begin("ESP32_Kumanda", true); 
+  SerialBT.setPin(pin, 4);
+  
+  pinMode(BTN_K, INPUT_PULLUP);
+  pinMode(BTN_E, INPUT_PULLUP);
+  pinMode(BTN_B, INPUT_PULLUP);
+  pinMode(BTN_D, INPUT_PULLUP);
+  pinMode(BTN_SOL, INPUT_PULLUP);
+
+  Serial.println("Kumanda Hazır. Bağlanılıyor...");
+  SerialBT.connect(address);
+}
+
+void loop() {
+  if (!SerialBT.connected()) {
+    static unsigned long sonDeneme = 0;
+    if (millis() - sonDeneme > 3000) {
+      SerialBT.connect(address);
+      sonDeneme = millis();
+    }
+    return; 
+  }
+
+  // --- Vites Mantığı ---
+  bool suanki_E = digitalRead(BTN_E);
+  if (suanki_E == LOW && son_E_durum == HIGH) {
+    if (vitesArtisYon) { vites++; if (vites >= 5) vitesArtisYon = false; }
+    else { vites--; if (vites <= 1) vitesArtisYon = true; }
+    delay(200);
+  }
+  son_E_durum = suanki_E;
+
+  // --- Veri Paketleme (Stabilize Sıralama) ---
+  if (millis() - sonGonderimZamani >= 40) {
+    int xVal = analogRead(JOY_X);
+    int yVal = analogRead(JOY_Y);
+    int korna = !digitalRead(BTN_K);
+    
+    // Senin isteğine göre butonları eşliyoruz:
+    int ileriButon = !digitalRead(BTN_B); // B butonu ileri
+    int sagButon   = !digitalRead(BTN_D); // D butonu sağ
+    int solButon   = !digitalRead(BTN_SOL);
+
+    // Paket Sırası: X, Y, Vites, Korna, SolButon, SağButon, IleriButon
+    String paket = String(xVal) + "," + 
+                   String(yVal) + "," + 
+                   String(vites) + "," + 
+                   String(korna) + "," + 
+                   String(solButon) + "," + 
+                   String(sagButon) + "," +
+                   String(ileriButon);
+    
+    SerialBT.println(paket);
+    sonGonderimZamani = millis();
+  }
+}
