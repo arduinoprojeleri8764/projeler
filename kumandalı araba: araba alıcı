@@ -1,0 +1,99 @@
+// --- Pin Tanımlamaları ---
+#define ENA 3
+#define IN1 2
+#define IN2 4
+#define IN3 5
+#define IN4 7
+#define ENB 6
+#define BUZZER_PIN 12 // Buzzer buraya bağlanacak
+
+// --- Ayarlar ---
+float dengeOrani = 0.82; // Sağ motor yavaşlatma (Düz gitmesi için)
+int vitesHizlari[] = {0, 110, 150, 190, 225, 255};
+unsigned long sonVeriZamani = 0;
+
+void setup() {
+  Serial.begin(115200);
+  Serial1.begin(9600); // Bluetooth (HC-06)
+  
+  pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT); pinMode(ENB, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  Serial.println("Buzzer Korna Sistemi Hazir!");
+}
+
+void loop() {
+  if (Serial1.available() > 0) {
+    String gelenPaket = Serial1.readStringUntil('\n');
+    sonVeriZamani = millis();
+
+    int degerler[7];
+    int index = 0;
+    char buf[gelenPaket.length() + 1];
+    gelenPaket.toCharArray(buf, sizeof(buf));
+    char *p = strtok(buf, ",");
+    while (p != NULL && index < 7) {
+      degerler[index++] = atoi(p);
+      p = strtok(NULL, ",");
+    }
+
+    // Gelen verileri ayıkla
+    int xVal = degerler[0];
+    int yVal = degerler[1];
+    int vites = degerler[2];
+    int kornaButonu = degerler[3]; // K butonu verisi
+    int solButon = degerler[4];
+    int sagButon = degerler[5];
+    int ileriButon = degerler[6];
+
+    int maxHiz = vitesHizlari[constrain(vites, 0, 5)];
+
+    // --- KORNA KONTROLÜ (Buzzer) ---
+    if (kornaButonu == 1) {
+      // 1000 Hz frekansında korna sesi çıkar
+      tone(BUZZER_PIN, 1000); 
+    } else {
+      noTone(BUZZER_PIN); // Buton bırakılınca sustur
+    }
+
+    // --- SÜRÜŞ KONTROLÜ ---
+    // 1. İleri (B butonu veya Joystick)
+    if (ileriButon == 1 || yVal < 1000) { 
+      motorSur(maxHiz, maxHiz, true, true);
+    } 
+    // 2. Geri
+    else if (yVal > 3000) { 
+      motorSur(maxHiz, maxHiz, false, false);
+    }
+    // 3. Keskin Sol
+    else if (solButon == 1 || xVal < 1000) {
+      motorSur(maxHiz, maxHiz, false, true);
+    }
+    // 4. Keskin Sağ
+    else if (sagButon == 1 || xVal > 3000) {
+      motorSur(maxHiz, maxHiz, true, false);
+    }
+    // 5. Dur
+    else {
+      motorSur(0, 0, true, true);
+    }
+  }
+
+  // Güvenlik: Veri kesilirse dur ve kornayı sustur
+  if (millis() - sonVeriZamani > 600) {
+    motorSur(0, 0, true, true);
+    noTone(BUZZER_PIN);
+  }
+}
+
+void motorSur(int solHiz, int sagHiz, bool solYon, bool sagYon) {
+  analogWrite(ENA, solHiz);
+  digitalWrite(IN1, solYon);
+  digitalWrite(IN2, !solYon);
+  
+  // Sağ motoru dengeleyerek gönderiyoruz
+  analogWrite(ENB, (int)(sagHiz * dengeOrani));
+  digitalWrite(IN3, sagYon);
+  digitalWrite(IN4, !sagYon);
+}
