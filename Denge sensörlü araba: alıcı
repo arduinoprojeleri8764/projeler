@@ -1,0 +1,159 @@
+// --- Pin Tanımlamaları ---
+#define ENA 3
+#define IN1 2
+#define IN2 4
+#define IN3 5
+#define IN4 7
+#define ENB 6
+#define BUZZER_PIN 12 
+#define LED_PIN 13    
+
+// --- Mekanik ve Filtre Ayarları ---
+float dengeOrani = 0.82; 
+unsigned long sonVeriZamani = 0;
+
+// Yumuşak Sürüş (Anti-Sarsıntı) Değişkenleri
+int mevcutSolHiz = 0;
+int mevcutSagHiz = 0;
+float filtreKatsayisi = 0.25; // 0.0 ile 1.0 arası. Değer küçüldükçe araba daha pürüzsüz ivmelenir, ani akım çekmez.
+
+// Geliştirilmiş Eğim Eşikleri
+int ortaNokta = 2048;   
+int oluBolge  = 300;    // Kararlı duruş için ideal ölü bölge
+
+// Seri Port Okuma Tamponu
+char seriBuffer[32];
+int bufferIndex = 0;
+
+void setup() {
+  Serial.begin(115200);
+  Serial1.begin(9600); // Leonardo Bluetooth Donanımsal Portu
+  
+  pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT); pinMode(ENB, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+
+  Serial.println("[SİSTEM] Kilitlemesiz Donanımsal Alıcı Aktif.");
+}
+
+void loop() {
+  // Arka planda donmayı engelleyen Karakter Tabanlı Hafif Okuma Döngüsü
+  while (Serial1.available() > 0) {
+    char c = Serial1.read();
+    
+    if (c == '\n' || c == '\r') {
+      if (bufferIndex > 0) {
+        seriBuffer[bufferIndex] = '\0'; // Satır sonu işareti koy
+        veriPaketiniIsle(seriBuffer);   // Veriyi anında işle
+        bufferIndex = 0;                // Buffer'ı sıfırla (Şişme engellendi)
+      }
+    } else if (bufferIndex < 31) {
+      seriBuffer[bufferIndex++] = c;
+    }
+  }
+
+  // Güvenlik Freni: 500ms boyunca yeni veri gelmezse akışı kes
+  if (millis() - sonVeriZamani > 500) {
+    motorFreni();
+    digitalWrite(LED_PIN, LOW);
+    noTone(BUZZER_PIN);
+  }
+}
+
+// Yıldırım hızında çalışan parçalayıcı fonksiyon (Asla Kilitlenmez)
+void veriPaketiniIsle(char* paket) {
+  sonVeriZamani = millis();
+
+  int xVal = 2048;
+  int yVal = 2048;
+  int farDurumu = 0;
+  int kornaButonu = 0;
+
+  char* token = strtok(paket, ",");
+  if (token != NULL) xVal = atoi(token);
+  
+  token = strtok(NULL, ",");
+  if (token != NULL) yVal = atoi(token);
+  
+  token = strtok(NULL, ",");
+  if (token != NULL) farDurumu = atoi(token);
+  
+  token = strtok(NULL, ",");
+  if (token != NULL) kornaButonu = atoi(token);
+
+  // --- Aksesuar Kontrolleri ---
+  digitalWrite(LED_PIN, farDurumu ? HIGH : LOW);
+  
+  if (kornaButonu == 1) {
+    tone(BUZZER_PIN, 1000);
+  } else {
+    noTone(BUZZER_PIN);
+  }
+
+  // --- Oransal Hız Hesaplama ve Yumuşatma Motor Algoritması ---
+  int hedefSolHiz = 0;
+  int hedefSagHiz = 0;
+  bool solIn1 = true, solIn2 = false, sagIn3 = true, sagIn4 = false;
+
+  // 1. İLERİ
+  if (yVal < (ortaNokta - oluBolge)) { 
+    hedefSolHiz = map(yVal, (ortaNokta - oluBolge), 0, 70, 255);
+    hedefSagHiz = hedefSolHiz;
+    solIn1 = true;  solIn2 = false; sagIn3 = true;  sagIn4 = false;
+  } 
+  // 2. GERİ
+  else if (yVal > (ortaNokta + oluBolge)) { 
+    hedefSolHiz = map(yVal, (ortaNokta + oluBolge), 4095, 70, 255);
+    hedefSagHiz = hedefSolHiz;
+    solIn1 = false; solIn2 = true;  sagIn3 = false; sagIn4 = true;
+  }
+  // 3. KESKİN SOL
+  else if (xVal < (ortaNokta - oluBolge)) {
+    hedefSolHiz = map(xVal, (ortaNokta - oluBolge), 0, 80, 255);
+    hedefSagHiz = hedefSolHiz;
+    solIn1 = false; solIn2 = true;  sagIn3 = true;  sagIn4 = false;
+  }
+  // 4. KESKİN SAĞ
+  else if (xVal > (ortaNokta + oluBolge)) {
+    hedefSolHiz = map(xVal, (ortaNokta + oluBolge), 4095, 80, 255);
+    hedefSagHiz = hedefSolHiz;
+    solIn1 = true;  solIn2 = false; sagIn3 = false; sagIn4 = true;
+  }
+  // 5. DURMA
+  else {
+    hedefSolHiz = 0;
+    hedefSagHiz = 0;
+  }
+
+  // Sürüş Sırrı: Dijital Alçak Geçiren Filtre (İvmelenme Yumuşatması)
+  // Anlık zıplamaları yok eder, motorları korur ve kilitlenmeyi önler
+  mevcutSolHiz = mevcutSolHiz + (hedefSolHiz - mevcutSolHiz) * filtreKatsayisi;
+  mevcutSagHiz = mevcutSagHiz + (hedefSagHiz - mevcutSagHiz) * filtreKatsayisi;
+
+  // Limit Kontrolleri
+  mevcutSolHiz = constrain(mevcutSolHiz, 0, 255);
+  mevcutSagHiz = constrain(mevcutSagHiz, 0, 255);
+
+  // Eğer hız sıfıra çok yaklaştıysa motorları tam durdur
+  if(hedefSolHiz == 0 && mevcutSolHiz < 15) mevcutSolHiz = 0;
+  if(hedefSagHiz == 0 && mevcutSagHiz < 15) mevcutSagHiz = 0;
+
+  // Motorları Sür
+  analogWrite(ENA, mevcutSolHiz);
+  digitalWrite(IN1, solIn1);
+  digitalWrite(IN2, solIn2);
+  
+  analogWrite(ENB, (int)(mevcutSagHiz * dengeOrani));
+  digitalWrite(IN3, sagIn3);
+  digitalWrite(IN4, sagIn4);
+}
+
+void motorFreni() {
+  mevcutSolHiz = 0;
+  mevcutSagHiz = 0;
+  analogWrite(ENA, 0);
+  digitalWrite(IN1, true);  digitalWrite(IN2, true);
+  analogWrite(ENB, 0);
+  digitalWrite(IN3, true);  digitalWrite(IN4, true);
+}
