@@ -1,0 +1,83 @@
+#include "BluetoothSerial.h"
+#include <Wire.h>
+
+// --- ARABANIN KİMLİK BİLGİLERİ ---
+uint8_t address[6]  = {0x00, 0x25, 0x02, 0x00, 0x3B, 0xBC}; // sizin hc-05 ve ya hc-06 bluetooth modülünüzün mac adresi yazılacak!!!!!
+const char *pin = "1234"; 
+
+BluetoothSerial SerialBT;
+const int MPU_addr = 0x68; 
+
+#define BTN_KORNA  27  
+#define BTN_FAR    25  
+
+bool sonFarButonDurum = HIGH;
+int farDurumu = 0; 
+unsigned long sonGonderimZamani = 0;
+
+void setup() {
+  Serial.begin(115200);
+  
+  Wire.begin(21, 22); 
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B);   
+  Wire.write(0);      
+  Wire.endTransmission(true);
+
+  // Bluetooth Sürücüsü Donanımsal Ayarları
+  SerialBT.begin("ESP32_Kumanda", true); 
+  SerialBT.setPin(pin, 4);
+  
+  pinMode(BTN_KORNA, INPUT_PULLUP);
+  pinMode(BTN_FAR, INPUT_PULLUP);
+
+  Serial.println("[SİSTEM] Ultra Stabil Kumanda Baslatildi.");
+  SerialBT.connect(address);
+}
+
+void loop() {
+  // Geliştirilmiş Agresif Yeniden Bağlanma Protokolü
+  if (!SerialBT.connected()) {
+    static unsigned long sonDeneme = 0;
+    if (millis() - sonDeneme > 2000) { // Deneme süresi 2 saniyeye çekildi
+      Serial.println("[UYARI] Baglanti koptu! Yeniden baglaniliyor...");
+      SerialBT.connect(address);
+      sonDeneme = millis();
+    }
+    return; 
+  }
+
+  // Far Butonu Kontrolü
+  bool suankiFarDurum = digitalRead(BTN_FAR);
+  if (suankiFarDurum == LOW && sonFarButonDurum == HIGH) {
+    farDurumu = !farDurumu; 
+    delay(200); 
+  }
+  sonFarButonDurum = suankiFarDurum;
+
+  // Akış Kontrolü: Seri portu boğmamak için ideal süre 50ms'ye çekildi (Saniyede 20 Paket)
+  if (millis() - sonGonderimZamani >= 50) {
+    
+    Wire.beginTransmission(MPU_addr);
+    Wire.write(0x3B); 
+    Wire.endTransmission(false);
+    Wire.requestFrom(MPU_addr, 6, true); 
+    
+    int16_t AcX = Wire.read() << 8 | Wire.read();
+    int16_t AcY = Wire.read() << 8 | Wire.read();
+    int16_t AcZ = Wire.read() << 8 | Wire.read();
+
+    // Çözünürlük ve Filtreleme kalibrasyonu
+    int xVal = map(AcX, -16500, 16500, 0, 4095); 
+    int yVal = map(AcY, -16500, 16500, 0, 4095); 
+
+    int korna = !digitalRead(BTN_KORNA); 
+
+    // Paket Boyutunu Küçülttük (Hafıza dostu veri transferi)
+    // Format: X,Y,F,K\n
+    String paket = String(xVal) + "," + String(yVal) + "," + String(farDurumu) + "," + String(korna);
+    
+    SerialBT.println(paket);
+    sonGonderimZamani = millis();
+  }
+}
